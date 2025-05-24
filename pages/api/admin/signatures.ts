@@ -1,6 +1,6 @@
 // pages/api/admin/signatures.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { db } from '../../../lib/db'; // Import db directly
+import { db, SignatureRow } from '../../../lib/db'; // Import db and SignatureRow
 import { isAuthenticated } from '../../../lib/auth';
 import { getNationDisplayData } from '../../../lib/nsApi';
 
@@ -11,10 +11,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (req.method === 'GET') {
         try {
-            const allSignatures = await db.all('SELECT id, "nationName", checksum, "signedAt" FROM signatures ORDER BY "signedAt" DESC');
+            const allSignatures: SignatureRow[] = await db.all('SELECT id, "nationName", checksum, "signedAt" FROM signatures ORDER BY "signedAt" DESC');
 
             const enrichedSignatures = await Promise.all(
-                allSignatures.map(async (signature: any) => {
+                allSignatures.map(async (signature: SignatureRow) => { // Use SignatureRow here
                     const displayData = await getNationDisplayData(signature.nationName);
                     return {
                         ...signature,
