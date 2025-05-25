@@ -1,13 +1,13 @@
 // lib/nsApi.ts
-import { parseStringPromise } from 'xml2js'; // Still used for parsing individual nation XML chunks
+import { parseStringPromise } from 'xml2js'; // Still useful for parsing structured XML if needed, but not for nation chunks now
 import { db, NationCacheRow } from './db';
 import { throttledNsFetch, FetchError } from './nsRateLimiter';
-import * as crypto from 'crypto'; // Use `* as` for consistent Node.js built-in imports
-import * as zlib from 'zlib'; // Node.js built-in for gzip
-import { pipeline } from 'stream/promises'; // For stream processing
-import * as fs from 'fs'; // Node.js built-in for file system
-import * as path from 'path'; // Node.js built-in for path manipulation
-import * as os from 'os'; // Node.js built-in for temp directory
+import * as crypto from 'crypto';
+import * as zlib from 'zlib';
+import { pipeline } from 'stream/promises';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import * as sax from 'sax'; // NEW: Streaming XML parser
 
 const NS_API_BASE_URL = 'https://www.nationstates.net/cgi-bin/api.cgi';
@@ -98,7 +98,7 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
  * This should be triggered as a scheduled task (e.g., via a cron job).
  */
 export async function processDailyNationDump(): Promise<{ success: boolean; message: string; nationsProcessed?: number }> {
-    console.log('Starting daily nations dump processing (streaming approach)...');
+    console.log('Starting daily nations dump processing (streaming object-building approach)...');
     const tempFilePath = path.join(os.tmpdir(), `nations_dump_${Date.now()}.xml.gz`);
     let nationsProcessed = 0;
     let batch: { nationName: string; flagUrl: string; region: string }[] = [];
@@ -116,11 +116,10 @@ export async function processDailyNationDump(): Promise<{ success: boolean; mess
         }
 
         const fileWriteStream = fs.createWriteStream(tempFilePath);
-        // Ensure the stream is typed correctly. Node's Response.body is a ReadableStream.
         await pipeline(response.body as any, fileWriteStream);
         console.log('Dump downloaded successfully.');
 
-        // 2. Set up streaming XML parser
+        // 2. Set up streaming XML parser to build objects directly
         const gunzip = zlib.createGunzip();
         const xmlReadStream = fs.createReadStream(tempFilePath);
 
@@ -131,9 +130,8 @@ export async function processDailyNationDump(): Promise<{ success: boolean; mess
             position: true
         });
 
-        let currentNationXmlBuffer = ''; // Buffer for the XML of a single <NATION> element
-        let inNationTag = false;
-        let nationTagDepth = 0; // To handle potential nested tags (though NS dump is usually flat for NATION)
+        let currentNation: { NAME?: string; FLAG?: string; REGION?: string } = {};
+        let currentTag: string | null = null; // To keep track of the tag whose text content we're currently collecting
 
         // Promise to track the completion of XML parsing and batch insertions
         const nationParsingPromise = new Promise<void>((resolve, reject) => {
@@ -144,61 +142,41 @@ export async function processDailyNationDump(): Promise<{ success: boolean; mess
 
             saxStream.on('opentag', (node: sax.Tag) => {
                 if (node.name === 'NATION') {
-                    inNationTag = true;
-                    nationTagDepth = 0; // Reset depth for a new NATION
-                    currentNationXmlBuffer = `<${node.name}${node.attributes ? Object.entries(node.attributes).map(([key, value]) => ` ${key}="${escapeXmlAttribute(String(value))}"`).join('') : ''}>`;
-                } else if (inNationTag) {
-                    nationTagDepth++;
-                    currentNationXmlBuffer += `<${node.name}${node.attributes ? Object.entries(node.attributes).map(([key, value]) => ` ${key}="${escapeXmlAttribute(String(value))}"`).join('') : ''}>`;
+                    currentNation = {}; // Start a new nation object
                 }
+                currentTag = node.name; // Keep track of the currently open tag
             });
 
             saxStream.on('text', (text: string) => {
-                if (inNationTag) {
-                    currentNationXmlBuffer += escapeXmlText(text); // Escape text content
-                }
-            });
-
-            saxStream.on('cdata', (cdata: string) => {
-                if (inNationTag) {
-                    currentNationXmlBuffer += `<![CDATA[${cdata}]]>`;
+                if (currentTag && currentNation) {
+                    // Only collect text for specific top-level tags we care about
+                    if (['NAME', 'FLAG', 'REGION'].includes(currentTag)) {
+                        // Append text content. SAX provides unescaped text.
+                        (currentNation as any)[currentTag] = (currentNation as any)[currentTag] ? (currentNation as any)[currentTag] + text : text;
+                    }
                 }
             });
 
             saxStream.on('closetag', async (tagName: string) => {
-                if (inNationTag) {
-                    currentNationXmlBuffer += `</${tagName}>`;
-                }
+                currentTag = null; // Clear current tag context
 
-                if (tagName === 'NATION' && nationTagDepth === 0) { // Only process when the root NATION tag closes
-                    inNationTag = false;
-                    // Process currentNationXmlBuffer
-                    try {
-                        // parseStringPromise expects a complete XML document,
-                        // so we wrap the nation XML in a root tag if it's missing (shouldn't be needed if `opentag` builds correctly)
-                        const nationXml = `<ROOT>${currentNationXmlBuffer}</ROOT>`; // Temporary root for parseStringPromise
-                        const parsedChunk = await parseStringPromise(nationXml, { explicitArray: false, mergeAttrs: true });
-                        const nation = parsedChunk.ROOT.NATION; // Access the NATION tag from the temporary root
+                if (tagName === 'NATION') {
+                    // NATION tag closed, process the collected nation data
+                    if (currentNation.NAME) { // Ensure it's a valid nation
+                        const nationName = currentNation.NAME;
+                        const flagCode = currentNation.FLAG;
+                        const flagUrl = flagCode ? `https://www.nationstates.net/images/flags/${flagCode}.jpg` : '';
+                        const region = currentNation.REGION || 'Unknown Region';
 
-                        if (nation && nation.NAME) { // Ensure nation data is valid
-                            const nationName = nation.NAME;
-                            const flagUrl = nation.FLAG;
-                            const region = nation.REGION || 'Unknown Region';
+                        batch.push({ nationName, flagUrl, region });
 
-                            batch.push({ nationName, flagUrl, region });
-
-                            if (batch.length >= BATCH_SIZE) {
-                                await insertNationBatch(batch);
-                                nationsProcessed += batch.length;
-                                batch = []; // Clear batch after insertion
-                            }
+                        if (batch.length >= BATCH_SIZE) {
+                            await insertNationBatch(batch);
+                            nationsProcessed += batch.length;
+                            batch = []; // Clear batch after insertion
                         }
-                    } catch (parseErr: any) {
-                        console.error('Error parsing single nation XML chunk:', parseErr);
                     }
-                    currentNationXmlBuffer = ''; // Reset buffer
-                } else if (inNationTag) {
-                    nationTagDepth--;
+                    currentNation = {}; // Reset for the next nation
                 }
             });
 
@@ -242,43 +220,21 @@ export async function processDailyNationDump(): Promise<{ success: boolean; mess
 async function insertNationBatch(batch: { nationName: string; flagUrl: string; region: string }[]): Promise<void> {
     if (batch.length === 0) return;
 
-    const values = batch.map(nation => {
-        // Using parameterized queries ($1, $2, etc.) is safer and handles escaping automatically.
-        // However, for VALUES clause with multiple rows, we build the string and must escape manually.
-        // Let's use a more robust way by preparing a single query with multiple value sets.
-        // This is more complex but safer.
-
-        // A simpler approach for batching with `pg` is to use UNNEST with arrays,
-        // or to generate a single INSERT statement with many ($1, $2, $3), ($4, $5, $6) ...
-        // This requires building a flat array of parameters.
-
-        // Example for a single INSERT with multiple value sets using parameters:
-        // INSERT INTO nation_cache (...) VALUES ($1,$2,$3), ($4,$5,$6), ...
-        // This requires generating parameters dynamically.
-
-        return `('${nation.nationName.replace(/'/g, "''")}', '${nation.flagUrl.replace(/'/g, "''")}', '${nation.region.replace(/'/g, "''")}', NOW())`;
-    }).join(',');
+    // Use parameterized query with UNNEST for efficient batch insert/update in PostgreSQL
+    // This is much safer against SQL injection and correctly handles escaping.
+    const nationNames = batch.map(n => n.nationName);
+    const flagUrls = batch.map(n => n.flagUrl);
+    const regions = batch.map(n => n.region);
 
     const sql = `
     INSERT INTO nation_cache ("nationName", "flagUrl", region, "lastUpdated")
-    VALUES ${values}
-    ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = EXCLUDED."flagUrl", region = EXCLUDED.region, "lastUpdated" = NOW();
+    SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], NOW()::timestamptz[])
+    ON CONFLICT ("nationName") DO UPDATE SET
+      "flagUrl" = EXCLUDED."flagUrl",
+      region = EXCLUDED.region,
+      "lastUpdated" = NOW();
   `;
-    await db.run(sql);
-    //console.log(`Inserted/Updated batch of ${batch.length} nations.`); // Too noisy for large dumps
-}
 
-// Helper functions for XML escaping
-function escapeXmlText(text: string): string {
-    return text.replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-}
-
-function escapeXmlAttribute(text: string): string {
-    return text.replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
-        .replace(/'/g, '\'');
+    // console.log(`Inserting/Updating batch of ${batch.length} nations...`); // Too noisy for large dumps
+    await db.run(sql, [nationNames, flagUrls, regions]);
 }

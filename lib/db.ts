@@ -3,12 +3,11 @@ import { Pool, QueryResult, QueryResultRow } from 'pg';
 
 export interface SignatureRow extends QueryResultRow {
     id: number;
-    nationName: string; // Corresponds to "nationName" column in DB
+    nationName: string;
     checksum: string;
-    signedAt: Date; // Corresponds to "signedAt" column in DB
+    signedAt: Date;
 }
 
-// Define interface for the cached nation data
 export interface NationCacheRow extends QueryResultRow {
     nationName: string;
     flagUrl: string;
@@ -31,7 +30,6 @@ const pool = new Pool({
 
 export async function initializeDatabase() {
     try {
-        // Create signatures table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS signatures (
                                                       id SERIAL PRIMARY KEY,
@@ -41,15 +39,14 @@ export async function initializeDatabase() {
                 );
         `);
 
-        // Create nation_cache table
         await pool.query(`
-      CREATE TABLE IF NOT EXISTS nation_cache (
-        "nationName" TEXT PRIMARY KEY,
-        "flagUrl" TEXT NOT NULL,
-        region TEXT NOT NULL,
-        "lastUpdated" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-      );
-    `);
+            CREATE TABLE IF NOT EXISTS nation_cache (
+                                                        "nationName" TEXT PRIMARY KEY,
+                                                        "flagUrl" TEXT NOT NULL,
+                                                        region TEXT NOT NULL,
+                                                        "lastUpdated" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+        `);
 
         console.log('Database initialized successfully or tables already exist.');
     } catch (error) {
@@ -58,7 +55,10 @@ export async function initializeDatabase() {
     }
 }
 
-export async function query<T extends QueryResultRow>(text: string, params?: (string | number | boolean | Date | null)[]): Promise<QueryResult<T>> {
+// Define a more flexible type for query parameters
+type QueryParam = string | number | boolean | Date | null | (string | number | boolean | Date | null)[]; // Allow arrays as elements
+
+export async function query<T extends QueryResultRow>(text: string, params?: QueryParam[]): Promise<QueryResult<T>> { // <--- Changed params type here
     try {
         return await pool.query<T>(text, params);
     } catch (error) {
@@ -68,15 +68,15 @@ export async function query<T extends QueryResultRow>(text: string, params?: (st
 }
 
 export const db = {
-    get: async (sql: string, params?: (string | number | boolean | Date | null)[]): Promise<any | undefined> => { // Can return SignatureRow or NationCacheRow, hence any for flexibility
+    get: async (sql: string, params?: QueryParam[]): Promise<any | undefined> => { // <--- Changed params type here
         const result = await query<any>(sql, params);
         return result.rows[0];
     },
-    all: async (sql: string, params?: (string | number | boolean | Date | null)[]): Promise<any[]> => { // Can return SignatureRow[] or NationCacheRow[], hence any[]
+    all: async (sql: string, params?: QueryParam[]): Promise<any[]> => { // <--- Changed params type here
         const result = await query<any>(sql, params);
         return result.rows;
     },
-    run: async (sql: string, params?: (string | number | boolean | Date | null)[]): Promise<void> => {
+    run: async (sql: string, params?: QueryParam[]): Promise<void> => { // <--- Changed params type here
         await query(sql, params);
     },
 };
