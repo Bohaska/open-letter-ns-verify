@@ -1,70 +1,23 @@
 // lib/nsApi.ts
+// This file is intended for Server-Side usage only (e.g., in API Routes or Server Components)
 
-import crypto from 'crypto';
 import { parseStringPromise } from 'xml2js';
-// Removed 'crypto' import as generateNSToken is moved
-import { db, NationCacheRow } from './db'; // db and NationCacheRow are server-side only
+import { db, NationCacheRow } from './db';
+import { throttledNsFetch, FetchError } from './nsRateLimiter'; // Import the throttler
+import crypto from 'crypto'; // Still needed for server-side generateNSTokenServer
+
 
 const NS_API_BASE_URL = 'https://www.nationstates.net/cgi-bin/api.cgi';
-const USER_AGENT = 'OpenLetterNSVerify/1.0 (contact@example.com - replace with your actual contact)';
+const USER_AGENT = 'OpenLetterNSVerify/1.0 (Jiangbei)';
 
-// Removed generateNSToken export from here. It's now in lib/client/ns-token-generator.ts.
-
-// Define cache duration in hours
 const CACHE_DURATION_HOURS = 24;
 
-/**
- * Verifies a NationStates nation using the provided checksum.
- * This endpoint returns a plain '1' or '0', not XML.
- * This function is intended for server-side execution.
- * @param nationName The name of the nation to verify.
- * @param checksum The checksum code provided by the user from NationStates.
- * @returns true if verification is successful, false otherwise.
- */
-export async function verifyNation(nationName: string, checksum: string): Promise<boolean> {
-    // This function would typically receive the token or generate it using a server-side method if needed
-    // For now, it relies on the client passing the correct token, which it gets from the client-side generator.
-    // We don't need generateNSToken here, as the API route will call it.
-    const url = new URL(NS_API_BASE_URL);
-    url.searchParams.append('a', 'verify');
-    url.searchParams.append('nation', nationName.replace(/ /g, '_'));
-    url.searchParams.append('checksum', checksum);
-    // Important: If you needed the token here for server-side verification directly from NationStates,
-    // you would also import a server-side version of generateNSToken or pass it in.
-    // For now, as the token is for `page=verify_login?token=`, the client handles it.
-    const token = generateNSTokenServer(nationName); // Call a server-side only token generator if verifyNation required it
-    url.searchParams.append('token', token);
-
-
-    try {
-        const response = await fetch(url.toString(), {
-            headers: {
-                'User-Agent': USER_AGENT,
-            },
-            cache: 'no-store',
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`NationStates API error (verify ${nationName}): Status ${response.status} - ${response.statusText}. Details: ${errorText}`);
-            return false;
-        }
-
-        const textResult = await response.text();
-        return textResult.trim() === '1';
-
-    } catch (error: any) {
-        console.error(`Error verifying nation with NationStates API (${nationName}): ${error?.message || error}`);
-        return false;
-    }
-}
-
-// Re-add a server-side only generateNSToken for use within lib/nsApi.ts if needed by other server-side functions
-// (e.g., if you later want verifyNation to re-generate the token for its own call to NS API).
-// For the current setup, verifyNation relies on the client to send the correct token, so this is illustrative.
+// Server-side only token generator (used internally by this server-side module)
 function generateNSTokenServer(nationName: string): string {
+    // Use NEXT_PUBLIC_ for consistency, but this runs on the server.
     if (!process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET) {
-        throw new Error('NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET is not set for server-side use.');
+        // This should ideally be caught by Vercel build checks, but good to have a runtime check.
+        throw new Error('NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET is not set for server-side token generation.');
     }
     return crypto
         .createHmac('sha256', process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET)
@@ -72,6 +25,51 @@ function generateNSTokenServer(nationName: string): string {
         .digest('hex');
 }
 
+/**
+ * Verifies a NationStates nation using the provided checksum.
+ * This function is intended for server-side execution and uses the rate limiter.
+ * @param nationName The name of the nation to verify.
+ * @param checksum The checksum code provided by the user from NationStates.
+ * @returns true if verification is successful, false otherwise.
+ */
+export async function verifyNation(nationName: string, checksum: string): Promise<boolean> {
+    const token = generateNSTokenServer(nationName); // Generate server-side token for the API call
+    const url = new URL(NS_API_BASE_URL);
+    url.searchParams.append('a', 'verify');
+    url.searchParams.append('nation', nationName.replace(/ /g, '_'));
+    url.searchParams.append('checksum', checksum);
+    url.searchParams.append('token', token);
+
+    const fetchCall = async () => {
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': USER_AGENT,
+            },
+            cache: 'no-store',
+        });
+
+        // Throw a custom error if not OK, so throttledNsFetch can catch 429
+        if (!response.ok) {
+            throw new FetchError(`HTTP error! status: ${response.status}`, response);
+        }
+        return response.text();
+    };
+
+    try {
+        const textResult = await throttledNsFetch(fetchCall, url.toString()); // Use throttler
+        return textResult.trim() === '1';
+    } catch (error: any) {
+        // If it's a FetchError from within the throttler, it means it wasn't a 429 retry,
+        // or it exhausted retries.
+        if (error instanceof FetchError) {
+            const errorText = await error.response.text();
+            console.error(`NationStates API error (verify ${nationName}): Status ${error.response.status} - ${error.response.statusText}. Details: ${errorText}`);
+        } else {
+            console.error(`Error verifying nation with NationStates API (${nationName}): ${error?.message || error}`);
+        }
+        return false;
+    }
+}
 
 interface NationDisplayData {
     name: string;
@@ -81,7 +79,7 @@ interface NationDisplayData {
 
 /**
  * Fetches basic display data (flag, region) for a given nation from the NationStates API.
- * Implements a caching mechanism. This function is intended for server-side execution.
+ * Implements a caching mechanism and uses the rate limiter.
  * Returns null if data cannot be fetched, if the nation is invalid, or if parsing fails.
  * @param nationName The name of the nation.
  * @returns An object with nation name, flag URL, and region, or null.
@@ -115,24 +113,26 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
             console.log(`No cache entry for ${nationName}. Fetching from API.`);
         }
 
-        // 2. If not in cache or cache expired, fetch from NationStates API
+        // 2. If not in cache or cache expired, fetch from NationStates API using the throttler
         const url = new URL(NS_API_BASE_URL);
         url.searchParams.append('nation', formattedNationName);
         url.searchParams.append('q', 'flag+region');
 
-        const response = await fetch(url.toString(), {
-            headers: {
-                'User-Agent': USER_AGENT,
-            },
-        });
+        const fetchCall = async () => {
+            const response = await fetch(url.toString(), {
+                headers: {
+                    'User-Agent': USER_AGENT,
+                },
+            });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`NationStates API error (getNationDisplayData for ${nationName}): Status ${response.status} - ${response.statusText}. Details: ${errorText}`);
-            return null;
-        }
+            if (!response.ok) {
+                throw new FetchError(`HTTP error! status: ${response.status}`, response);
+            }
+            return response.text();
+        };
 
-        const xml = await response.text();
+        const xml = await throttledNsFetch(fetchCall, url.toString()); // Use throttler here
+
         if (!xml.trim().startsWith('<')) {
             console.warn(`Non-XML response for nation ${nationName}. Returning null. Response snippet: ${xml.substring(0, 100)}...`);
             return null;
@@ -171,7 +171,12 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
             region: fetchedRegion || 'Unknown Region',
         };
     } catch (error: any) {
-        console.error(`Error fetching or caching nation display data for ${nationName}: ${error?.message || String(error)}`);
+        if (error instanceof FetchError) {
+            const errorText = await error.response.text();
+            console.error(`Error fetching or caching nation display data for ${nationName}: Status ${error.response.status} - ${error.response.statusText}. Details: ${errorText}`);
+        } else {
+            console.error(`Error fetching or caching nation display data for ${nationName}: ${error?.message || String(error)}`);
+        }
         return null;
     }
 }
