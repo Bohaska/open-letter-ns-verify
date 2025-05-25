@@ -2,8 +2,9 @@
 'use client';
 
 import { useState } from 'react';
-import { generateNSToken } from '../../lib/nsApi';
-import { useRouter } from 'next/navigation'; // Import useRouter
+// Corrected import path for generateNSToken
+import { generateNSToken } from '../../lib/client/ns-token-generator'; // <--- UPDATED IMPORT PATH
+import { useRouter } from 'next/navigation';
 
 export default function SignLetter() {
     const [nationName, setNationName] = useState('');
@@ -11,9 +12,8 @@ export default function SignLetter() {
     const [message, setMessage] = useState('');
     const [isError, setIsError] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const router = useRouter(); // Initialize useRouter
+    const router = useRouter();
 
-    // The verification URL depends on nationName, so it must be generated client-side
     const verificationUrl = `https://www.nationstates.net/page=verify_login?token=${encodeURIComponent(generateNSToken(nationName))}`;
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -43,10 +43,9 @@ export default function SignLetter() {
             if (response.ok) {
                 setMessage(data.message);
                 setIsError(false);
-                // Redirect to main page after a short delay
                 setTimeout(() => {
                     router.push('/');
-                }, 2000); // Redirect after 2 seconds
+                }, 2000);
             } else {
                 setMessage(data.error || 'An unexpected error occurred.');
                 setIsError(true);
@@ -82,12 +81,10 @@ export default function SignLetter() {
             margin: '20px 0',
         },
         title: {
-            // fontSize: '2rem', /* Global H1 applies */
             marginBottom: '1.5rem',
-            // color: '#2c3e50',
         },
         instructions: {
-            fontSize: '10pt', /* Base font size */
+            fontSize: '10pt',
             marginBottom: '1rem',
             textAlign: 'left',
             lineHeight: '1.5em',
@@ -101,7 +98,7 @@ export default function SignLetter() {
             fontSize: '10pt',
         },
         link: {
-            color: 'green', // Default link color from global
+            color: 'green',
             wordBreak: 'break-all',
         },
         form: {
@@ -117,13 +114,12 @@ export default function SignLetter() {
             display: 'block',
             marginBottom: '5px',
             fontWeight: 'bold',
-            fontSize: '10pt', /* Base font size */
+            fontSize: '10pt',
         },
         input: {
             width: '100%',
-            // Styles are mostly global now, just ensure it takes full width
         },
-        button: { /* NS button style */
+        button: {
             padding: '0.5em 2.5em',
             backgroundColor: '#EAEAE2',
             color: '#000000',
@@ -134,7 +130,6 @@ export default function SignLetter() {
             boxShadow: '1px 1px 2px rgba(0,0,0,0.1)',
             cursor: 'pointer',
             transition: 'background-color 0.3s ease',
-            // No direct hover state for inline styles, rely on global CSS for now
         },
         errorMessage: {
             color: '#FF3333',
@@ -144,19 +139,19 @@ export default function SignLetter() {
             borderRadius: '12px',
             padding: '1em',
             margin: '0.5em auto',
-            maxWidth: '75%', /* Adjust based on original NS error margin */
+            maxWidth: '75%',
             backgroundColor: 'white',
         },
         successMessage: {
             color: 'green',
             marginTop: '1rem',
             fontWeight: 'bold',
-            border: 'solid 2px #696', /* NS info border */
+            border: 'solid 2px #696',
             borderRadius: '12px',
             padding: '1em',
             margin: '0.5em auto',
             maxWidth: '75%',
-            backgroundColor: '#F0FFF0', /* NS info background */
+            backgroundColor: '#F0FFF0',
         },
     };
 
@@ -176,10 +171,10 @@ export default function SignLetter() {
                             {verificationUrl.length > 70 ? `${verificationUrl.substring(0, 67)}...` : verificationUrl}
                         </a>
                         <br />
-                        (Make sure you are logged into NationStates as <b>{nationName || '[Your Nation Name]'}</b>.)
+                        (Make sure you are logged into NationStates as **{nationName || '[Your Nation Name]'}**.)
                     </li>
                     <li>
-                        Copy the <b>checksum code</b> displayed on that page.
+                        Copy the **checksum code** displayed on that page.
                     </li>
                     <li>
                         Enter your Nation name and the checksum code below.

@@ -1,44 +1,40 @@
 // lib/nsApi.ts
-import { parseStringPromise } from 'xml2js';
+
 import crypto from 'crypto';
-import { db, NationCacheRow } from './db'; // Import db and NationCacheRow
+import { parseStringPromise } from 'xml2js';
+// Removed 'crypto' import as generateNSToken is moved
+import { db, NationCacheRow } from './db'; // db and NationCacheRow are server-side only
 
 const NS_API_BASE_URL = 'https://www.nationstates.net/cgi-bin/api.cgi';
 const USER_AGENT = 'OpenLetterNSVerify/1.0 (contact@example.com - replace with your actual contact)';
 
-// Define cache duration in hours
-const CACHE_DURATION_HOURS = 24; // Cache data for 24 hours
+// Removed generateNSToken export from here. It's now in lib/client/ns-token-generator.ts.
 
-/**
- * Generates a consistent token for NationStates verification based on the nation name.
- * This token is used to ensure the checksum is site-specific.
- * @param nationName The name of the nation.
- * @returns A SHA256 hash as the token.
- */
-export function generateNSToken(nationName: string): string {
-    if (!process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET) {
-        throw new Error('NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET is not set in environment variables.');
-    }
-    return crypto
-        .createHmac('sha256', process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET)
-        .update(nationName.toLowerCase())
-        .digest('hex');
-}
+// Define cache duration in hours
+const CACHE_DURATION_HOURS = 24;
 
 /**
  * Verifies a NationStates nation using the provided checksum.
  * This endpoint returns a plain '1' or '0', not XML.
+ * This function is intended for server-side execution.
  * @param nationName The name of the nation to verify.
  * @param checksum The checksum code provided by the user from NationStates.
  * @returns true if verification is successful, false otherwise.
  */
 export async function verifyNation(nationName: string, checksum: string): Promise<boolean> {
-    const token = generateNSToken(nationName);
+    // This function would typically receive the token or generate it using a server-side method if needed
+    // For now, it relies on the client passing the correct token, which it gets from the client-side generator.
+    // We don't need generateNSToken here, as the API route will call it.
     const url = new URL(NS_API_BASE_URL);
     url.searchParams.append('a', 'verify');
     url.searchParams.append('nation', nationName.replace(/ /g, '_'));
     url.searchParams.append('checksum', checksum);
+    // Important: If you needed the token here for server-side verification directly from NationStates,
+    // you would also import a server-side version of generateNSToken or pass it in.
+    // For now, as the token is for `page=verify_login?token=`, the client handles it.
+    const token = generateNSTokenServer(nationName); // Call a server-side only token generator if verifyNation required it
     url.searchParams.append('token', token);
+
 
     try {
         const response = await fetch(url.toString(), {
@@ -63,6 +59,20 @@ export async function verifyNation(nationName: string, checksum: string): Promis
     }
 }
 
+// Re-add a server-side only generateNSToken for use within lib/nsApi.ts if needed by other server-side functions
+// (e.g., if you later want verifyNation to re-generate the token for its own call to NS API).
+// For the current setup, verifyNation relies on the client to send the correct token, so this is illustrative.
+function generateNSTokenServer(nationName: string): string {
+    if (!process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET) {
+        throw new Error('NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET is not set for server-side use.');
+    }
+    return crypto
+        .createHmac('sha256', process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET)
+        .update(nationName.toLowerCase())
+        .digest('hex');
+}
+
+
 interface NationDisplayData {
     name: string;
     flagUrl: string;
@@ -71,7 +81,7 @@ interface NationDisplayData {
 
 /**
  * Fetches basic display data (flag, region) for a given nation from the NationStates API.
- * Implements a caching mechanism.
+ * Implements a caching mechanism. This function is intended for server-side execution.
  * Returns null if data cannot be fetched, if the nation is invalid, or if parsing fails.
  * @param nationName The name of the nation.
  * @returns An object with nation name, flag URL, and region, or null.
@@ -92,10 +102,9 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
             const hoursSinceUpdate = (now.getTime() - lastUpdatedDate.getTime()) / (1000 * 60 * 60);
 
             if (hoursSinceUpdate < CACHE_DURATION_HOURS) {
-                // Cache is fresh, return cached data
                 console.log(`Cache hit for ${nationName}. Returning cached data.`);
                 return {
-                    name: nationName, // Use the originally requested name
+                    name: nationName,
                     flagUrl: cachedData.flagUrl,
                     region: cachedData.region,
                 };
@@ -136,7 +145,6 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
 
         if (!isValidNationData) {
             console.warn(`No valid nation data (missing <NAME> tag) or invalid nation response for: ${nationName}. Full XML:`, xml);
-            // Optionally, delete invalid entry from cache if it exists
             if (cachedData) {
                 await db.run('DELETE FROM nation_cache WHERE "nationName" = $1', [nationName]);
                 console.log(`Removed invalid cached entry for ${nationName}.`);
@@ -151,8 +159,8 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
         // 3. Update/Insert into Cache
         await db.run(
             `INSERT INTO nation_cache ("nationName", "flagUrl", region, "lastUpdated")
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = $2, region = $3, "lastUpdated" = NOW()`,
+             VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = $2, region = $3, "lastUpdated" = NOW()`,
             [nationData.NAME, fetchedFlagUrl, fetchedRegion]
         );
         console.log(`Cache updated/inserted for ${nationData.NAME}.`);
