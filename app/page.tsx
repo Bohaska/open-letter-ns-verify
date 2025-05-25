@@ -104,7 +104,7 @@ export default function Home() {
             backgroundColor: '#F9F9F9', /* Minorinfo background */
             border: '1px solid #DDD', /* Minorinfo border */
             borderRadius: '8px', /* Minorinfo radius */
-            padding: '0.75em 0.5em',
+            padding: '0.5em',
             marginRight: '10%', /* Minorinfo margin */
             marginLeft: 'auto', /* Center if possible */
             maxWidth: 'calc(100% - 20%)', /* Adjust based on margin */
@@ -181,15 +181,15 @@ export default function Home() {
                                         <Image
                                             src={signature.flagUrl}
                                             alt={`${signature.nationName} flag`}
-                                            width={30}
-                                            height={20}
+                                            width={32}
+                                            height={24}
                                             style={styles.flagImage}
                                             unoptimized={true}
                                         />
                                     </div>
                                 )}
                                 <span style={{flexGrow: 1, textAlign: 'left'}}>
-                  **{signature.nationName}** (Region: {signature.region || 'Unknown'}) - Signed on {new Date(signature.signedAt).toLocaleDateString()}
+                                    <b>{signature.nationName}</b> ({signature.region || 'Unknown'}) - Signed on {new Date(signature.signedAt).toLocaleDateString()}
                 </span>
                             </li>
                         ))}
