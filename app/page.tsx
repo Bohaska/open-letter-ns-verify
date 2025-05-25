@@ -14,7 +14,7 @@ interface Signature {
 }
 
 // IMPORTANT: Replace this with the actual embed URL you get from Google Docs
-const GOOGLE_DOC_EMBED_URL = 'https://docs.google.com/document/d/e/2PACX-1vQ5p8p_eY6V4j0xZ2a5n0a8W0mYc6S_3Q7W7R2m_9cZ0jX1g2k0V5r2q4q8M0a9w0c1h2/pub?embedded=true'; // Your actual URL
+const GOOGLE_DOC_EMBED_URL = 'https://docs.google.com/document/d/e/2PACX-1vQ-QkQswHsv3OGbX21qYsQ49t1VbLcHiPRzZA_CWvODPCDwmkP8XHEqvt2Tq2NlXhsD_UTjlYN9tf1X/pub?embedded=true'; // Your actual URL
 
 // Import the time formatting utility
 import { formatTimeAgo } from '../lib/utils';
@@ -203,7 +203,7 @@ export default function Home() {
                                     </div>
                                 )}
                                 <span style={{flexGrow: 1, textAlign: 'left'}}>
-                                    <b>{signature.nationName}</b> (Region: {signature.region || 'Unknown'})
+                                    <b>{signature.nationName}</b> ({signature.region || 'Unknown'})
                 </span>
                                 {/* Use the <time> element as requested */}
                                 <time dateTime={signature.signedAt} style={styles.signedAtTime}>
