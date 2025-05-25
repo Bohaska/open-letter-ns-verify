@@ -120,7 +120,7 @@ export default function Home() {
         },
         signatureItem: {
             padding: '8px 0',
-            borderBottom: '1px dashed #eee',
+            borderBottom: '1px dashed #DDD',
             display: 'flex',
             alignItems: 'center',
             fontSize: '10pt',

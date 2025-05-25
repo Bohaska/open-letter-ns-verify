@@ -176,10 +176,10 @@ export default function SignLetter() {
                             {verificationUrl.length > 70 ? `${verificationUrl.substring(0, 67)}...` : verificationUrl}
                         </a>
                         <br />
-                        (Make sure you are logged into NationStates as **{nationName || '[Your Nation Name]'}**.)
+                        (Make sure you are logged into NationStates as <b>{nationName || '[Your Nation Name]'}</b>.)
                     </li>
                     <li>
-                        Copy the **checksum code** displayed on that page.
+                        Copy the <b>checksum code</b> displayed on that page.
                     </li>
                     <li>
                         Enter your Nation name and the checksum code below.
