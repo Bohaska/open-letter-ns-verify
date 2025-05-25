@@ -76,6 +76,11 @@ export default function Home() {
         title: {
             marginBottom: '1.5rem',
         },
+        subtitle: {
+            fontSize: '1.5em',
+            marginBottom: '1.5em',
+            fontWeight: 'normal'
+        },
         letterContentEmbed: {
             width: '100%',
             height: '600px',
@@ -164,6 +169,10 @@ export default function Home() {
     return (
         <div style={styles.container}>
             <main style={styles.main}>
+                <h1 style={styles.title}>On Separatist Peoples</h1>
+
+                <h2 style={styles.subtitle}>An Open
+                    Letter to Site Staff</h2>
                 <div style={styles.letterContentEmbed}>
                     <iframe
                         src={GOOGLE_DOC_EMBED_URL}

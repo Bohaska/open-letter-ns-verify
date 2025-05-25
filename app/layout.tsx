@@ -3,8 +3,8 @@ import './globals.css';
 import { initializeDatabase } from '../lib/db'; // Import the initialization function
 
 export const metadata = {
-    title: 'Regarding Separatist Peoples',
-    description: 'An open letter to NationStates.',
+    title: 'On Separatist Peoples',
+    description: 'An Open Letter to Site Staff.',
 };
 
 export default async function RootLayout({ // Make RootLayout async
