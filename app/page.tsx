@@ -204,7 +204,7 @@ export default function Home() {
                                     </div>
                                 )}
                                 <span style={{flexGrow: 1, textAlign: 'left'}}>
-                  **{signature.nationName}** (Region: {signature.region || 'Unknown'})
+                                    <b>{signature.nationName}</b> (Region: {signature.region || 'Unknown'})
                 </span>
                                 {/* Use the <time> element as requested */}
                                 <time dateTime={signature.signedAt} style={styles.signedAtTime}>
