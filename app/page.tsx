@@ -118,8 +118,8 @@ export default function Home() {
             color: 'black',
         },
         flagImageWrapper: {
-            width: '30px',
-            height: '20px',
+            width: '32px',
+            height: '24px',
             position: 'relative',
             marginRight: '10px',
             display: 'flex',
