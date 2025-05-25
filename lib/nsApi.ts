@@ -1,22 +1,17 @@
 // lib/nsApi.ts
-// This file is intended for Server-Side usage only (e.g., in API Routes or Server Components)
-
 import { parseStringPromise } from 'xml2js';
 import { db, NationCacheRow } from './db';
-import { throttledNsFetch, FetchError } from './nsRateLimiter'; // Import the throttler
-import crypto from 'crypto'; // Still needed for server-side generateNSTokenServer
-
+import { throttledNsFetch, FetchError } from './nsRateLimiter'; // Still needed for verifyNation
+import crypto from 'crypto';
 
 const NS_API_BASE_URL = 'https://www.nationstates.net/cgi-bin/api.cgi';
-const USER_AGENT = 'OpenLetterNSVerify/1.0 (Jiangbei)';
+const NS_DUMP_NATIONS_URL = 'https://www.nationstates.net/pages/nations.xml.gz'; // New: Daily dump URL
+const USER_AGENT = 'OpenLetterNSVerify/1.0 (contact@example.com - replace with your actual contact)';
 
-const CACHE_DURATION_HOURS = 24;
+const CACHE_DURATION_HOURS = 24; // Still relevant for determining when to refresh the cache via dump
 
-// Server-side only token generator (used internally by this server-side module)
 function generateNSTokenServer(nationName: string): string {
-    // Use NEXT_PUBLIC_ for consistency, but this runs on the server.
     if (!process.env.NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET) {
-        // This should ideally be caught by Vercel build checks, but good to have a runtime check.
         throw new Error('NEXT_PUBLIC_NS_VERIFY_TOKEN_SECRET is not set for server-side token generation.');
     }
     return crypto
@@ -27,13 +22,14 @@ function generateNSTokenServer(nationName: string): string {
 
 /**
  * Verifies a NationStates nation using the provided checksum.
- * This function is intended for server-side execution and uses the rate limiter.
+ * This function still hits the live API for single-nation verification,
+ * as it's not bulk data and needs to be real-time.
  * @param nationName The name of the nation to verify.
  * @param checksum The checksum code provided by the user from NationStates.
  * @returns true if verification is successful, false otherwise.
  */
 export async function verifyNation(nationName: string, checksum: string): Promise<boolean> {
-    const token = generateNSTokenServer(nationName); // Generate server-side token for the API call
+    const token = generateNSTokenServer(nationName);
     const url = new URL(NS_API_BASE_URL);
     url.searchParams.append('a', 'verify');
     url.searchParams.append('nation', nationName.replace(/ /g, '_'));
@@ -48,7 +44,6 @@ export async function verifyNation(nationName: string, checksum: string): Promis
             cache: 'no-store',
         });
 
-        // Throw a custom error if not OK, so throttledNsFetch can catch 429
         if (!response.ok) {
             throw new FetchError(`HTTP error! status: ${response.status}`, response);
         }
@@ -56,11 +51,9 @@ export async function verifyNation(nationName: string, checksum: string): Promis
     };
 
     try {
-        const textResult = await throttledNsFetch(fetchCall, url.toString()); // Use throttler
+        const textResult = await throttledNsFetch(fetchCall, url.toString());
         return textResult.trim() === '1';
     } catch (error: any) {
-        // If it's a FetchError from within the throttler, it means it wasn't a 429 retry,
-        // or it exhausted retries.
         if (error instanceof FetchError) {
             const errorText = await error.response.text();
             console.error(`NationStates API error (verify ${nationName}): Status ${error.response.status} - ${error.response.statusText}. Details: ${errorText}`);
@@ -78,105 +71,140 @@ interface NationDisplayData {
 }
 
 /**
- * Fetches basic display data (flag, region) for a given nation from the NationStates API.
- * Implements a caching mechanism and uses the rate limiter.
- * Returns null if data cannot be fetched, if the nation is invalid, or if parsing fails.
+ * Fetches basic display data (flag, region) for a given nation from the NationStates cache.
+ * It NO LONGER hits the live API. Data is expected to be pre-populated by a daily dump process.
  * @param nationName The name of the nation.
- * @returns An object with nation name, flag URL, and region, or null.
+ * @returns An object with nation name, flag URL, and region, or null if not found in cache.
  */
 export async function getNationDisplayData(nationName: string): Promise<NationDisplayData | null> {
-    const formattedNationName = nationName.replace(/ /g, '_');
-    const now = new Date();
-
     try {
-        // 1. Check Cache First
         const cachedData: NationCacheRow | undefined = await db.get(
-            'SELECT "flagUrl", region, "lastUpdated" FROM nation_cache WHERE "nationName" = $1',
+            'SELECT "flagUrl", region FROM nation_cache WHERE "nationName" = $1', // Removed lastUpdated from select as freshness is managed by dump process
             [nationName]
         );
 
         if (cachedData) {
-            const lastUpdatedDate = new Date(cachedData.lastUpdated);
-            const hoursSinceUpdate = (now.getTime() - lastUpdatedDate.getTime()) / (1000 * 60 * 60);
-
-            if (hoursSinceUpdate < CACHE_DURATION_HOURS) {
-                console.log(`Cache hit for ${nationName}. Returning cached data.`);
-                return {
-                    name: nationName,
-                    flagUrl: cachedData.flagUrl,
-                    region: cachedData.region,
-                };
-            } else {
-                console.log(`Cache expired for ${nationName}. Fetching from API.`);
-            }
+            // Data is retrieved directly from cache, no freshness check here as the dump updates it.
+            console.log(`Cache hit for ${nationName}. Returning cached data.`);
+            return {
+                name: nationName,
+                flagUrl: cachedData.flagUrl,
+                region: cachedData.region,
+            };
         } else {
-            console.log(`No cache entry for ${nationName}. Fetching from API.`);
-        }
-
-        // 2. If not in cache or cache expired, fetch from NationStates API using the throttler
-        const url = new URL(NS_API_BASE_URL);
-        url.searchParams.append('nation', formattedNationName);
-        url.searchParams.append('q', 'flag+region');
-
-        const fetchCall = async () => {
-            const response = await fetch(url.toString(), {
-                headers: {
-                    'User-Agent': USER_AGENT,
-                },
-            });
-
-            if (!response.ok) {
-                throw new FetchError(`HTTP error! status: ${response.status}`, response);
-            }
-            return response.text();
-        };
-
-        const xml = await throttledNsFetch(fetchCall, url.toString()); // Use throttler here
-
-        if (!xml.trim().startsWith('<')) {
-            console.warn(`Non-XML response for nation ${nationName}. Returning null. Response snippet: ${xml.substring(0, 100)}...`);
+            console.warn(`Nation data for "${nationName}" not found in cache. It might be new or dump hasn't run yet.`);
             return null;
         }
-
-        const result = await parseStringPromise(xml, { explicitArray: false, mergeAttrs: true });
-        const nationData = result.NATION;
-
-        const isValidNationData = nationData && nationData.NAME;
-
-        if (!isValidNationData) {
-            console.warn(`No valid nation data (missing <NAME> tag) or invalid nation response for: ${nationName}. Full XML:`, xml);
-            if (cachedData) {
-                await db.run('DELETE FROM nation_cache WHERE "nationName" = $1', [nationName]);
-                console.log(`Removed invalid cached entry for ${nationName}.`);
-            }
-            return null;
-        }
-
-        const flagCode = nationData.FLAG;
-        const fetchedFlagUrl = flagCode ? `https://www.nationstates.net/images/flags/${flagCode}.jpg` : '';
-        const fetchedRegion = nationData.REGION;
-
-        // 3. Update/Insert into Cache
-        await db.run(
-            `INSERT INTO nation_cache ("nationName", "flagUrl", region, "lastUpdated")
-             VALUES ($1, $2, $3, NOW())
-                 ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = $2, region = $3, "lastUpdated" = NOW()`,
-            [nationData.NAME, fetchedFlagUrl, fetchedRegion]
-        );
-        console.log(`Cache updated/inserted for ${nationData.NAME}.`);
-
-        return {
-            name: nationData.NAME,
-            flagUrl: fetchedFlagUrl,
-            region: fetchedRegion || 'Unknown Region',
-        };
     } catch (error: any) {
-        if (error instanceof FetchError) {
-            const errorText = await error.response.text();
-            console.error(`Error fetching or caching nation display data for ${nationName}: Status ${error.response.status} - ${error.response.statusText}. Details: ${errorText}`);
-        } else {
-            console.error(`Error fetching or caching nation display data for ${nationName}: ${error?.message || String(error)}`);
-        }
+        console.error(`Error retrieving nation display data from cache for ${nationName}: ${error?.message || String(error)}`);
         return null;
     }
 }
+
+// New function to process daily dump
+import * as zlib from 'zlib'; // Node.js built-in for gzip
+import { pipeline } from 'stream/promises'; // For stream processing
+import { createWriteStream } from 'fs'; // Node.js built-in for file system
+import path from 'path'; // Node.js built-in for path manipulation
+import os from 'os'; // Node.js built-in for temp directory
+
+/**
+ * Downloads the daily nations dump, processes it, and updates the nation_cache table.
+ * This should be triggered as a scheduled task (e.g., via a cron job).
+ */
+export async function processDailyNationDump(): Promise<{ success: boolean; message: string; nationsProcessed?: number }> {
+    console.log('Starting daily nations dump processing...');
+    const tempFilePath = path.join(os.tmpdir(), `nations_dump_${Date.now()}.xml.gz`);
+    let nationsProcessed = 0;
+
+    try {
+        // 1. Download the gzipped dump file
+        console.log(`Downloading dump from ${NS_DUMP_NATIONS_URL} to ${tempFilePath}`);
+        const response = await fetch(NS_DUMP_NATIONS_URL, {
+            headers: { 'User-Agent': USER_AGENT }
+        });
+
+        if (!response.ok || !response.body) {
+            throw new Error(`Failed to download daily dump: ${response.status} - ${response.statusText}`);
+        }
+
+        const fileStream = createWriteStream(tempFilePath);
+        await pipeline(response.body as any, fileStream); // Use as any due to Response.body not being a standard readable stream type in TS
+        console.log('Dump downloaded successfully.');
+
+        // 2. Decompress and read the XML
+        const gunzip = zlib.createGunzip();
+        const xmlStream = require('fs').createReadStream(tempFilePath).pipe(gunzip);
+
+        let xmlData = '';
+        xmlStream.on('data', (chunk: Buffer) => {
+            xmlData += chunk.toString();
+        });
+
+        await new Promise<void>((resolve, reject) => {
+            xmlStream.on('end', resolve);
+            xmlStream.on('error', reject);
+        });
+        console.log('Dump decompressed successfully.');
+
+        // 3. Parse XML and update database in batches
+        console.log('Parsing XML and preparing for database update...');
+        const result = await parseStringPromise(xmlData, { explicitArray: false, mergeAttrs: true });
+        const nations = result.NATIONS.NATION; // Expect an array of NATION objects
+
+        if (!Array.isArray(nations)) {
+            console.warn('Expected nations to be an array but got:', nations);
+            throw new Error('Unexpected dump format: NATIONS.NATION is not an array.');
+        }
+
+        // Prepare for batch insertion/update
+        const BATCH_SIZE = 500; // Adjust based on your database performance and Vercel limits
+        const updatePromises: Promise<void>[] = [];
+
+        for (let i = 0; i < nations.length; i += BATCH_SIZE) {
+            const batch = nations.slice(i, i + BATCH_SIZE);
+            const values = batch.map((nation: any) => {
+                const nationName = nation.NAME;
+                const flagCode = nation.FLAG;
+                const flagUrl = flagCode ? `https://www.nationstates.net/images/flags/${flagCode}.jpg` : '';
+                const region = nation.REGION || 'Unknown Region'; // Fallback for region
+                return `('${nationName.replace(/'/g, "''")}', '${flagUrl.replace(/'/g, "''")}', '${region.replace(/'/g, "''")}')`;
+            }).join(',');
+
+            if (values) {
+                const sql = `
+              INSERT INTO nation_cache ("nationName", "flagUrl", region, "lastUpdated")
+              VALUES ${values}
+              ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = EXCLUDED."flagUrl", region = EXCLUDED.region, "lastUpdated" = NOW();
+          `;
+                updatePromises.push(db.run(sql));
+                nationsProcessed += batch.length;
+            }
+        }
+
+        await Promise.all(updatePromises);
+        console.log(`Database update complete. Processed ${nationsProcessed} nations.`);
+
+        // 4. Clean up temporary file
+        require('fs').unlink(tempFilePath, (err: any) => {
+            if (err) console.error(`Error deleting temp file ${tempFilePath}:`, err);
+            else console.log(`Cleaned up temp file: ${tempFilePath}`);
+        });
+
+        return { success: true, message: `Successfully processed ${nationsProcessed} nations from daily dump.`, nationsProcessed };
+
+    } catch (error: any) {
+        console.error('Error processing daily nation dump:', error);
+        // Clean up temp file even on error
+        require('fs').unlink(tempFilePath, (err: any) => {
+            if (err) console.error(`Error deleting temp file ${tempFilePath} after error:`, err);
+        });
+        return { success: false, message: `Failed to process daily dump: ${error?.message || String(error)}` };
+    }
+}
+
+// Add polyfills for Node.js modules that are not automatically bundled by Next.js if needed by processDailyNationDump.
+// Vercel's Node.js runtime generally has these, but explicit import ensures bundling for serverless functions.
+// Note: 'stream/promises' and 'zlib' are standard Node.js modules. 'fs' is also.
+// The require('fs') part is a common way to use 'fs' when you don't want it to be a top-level import to avoid client-side bundling issues.
+// But since this entire file is server-side only, an `import * as fs from 'fs'` would also be fine.
