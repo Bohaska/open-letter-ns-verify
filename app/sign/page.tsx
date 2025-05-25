@@ -1,10 +1,9 @@
+// app/sign/page.tsx
 'use client';
 
-
-// pages/page.tsx
-import Head from 'next/head';
 import { useState } from 'react';
-import { generateNSToken } from '../../lib/nsApi'; // Import the token generator
+import { generateNSToken } from '../../lib/nsApi';
+import { useRouter } from 'next/navigation'; // Import useRouter
 
 export default function SignLetter() {
     const [nationName, setNationName] = useState('');
@@ -12,7 +11,9 @@ export default function SignLetter() {
     const [message, setMessage] = useState('');
     const [isError, setIsError] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter(); // Initialize useRouter
 
+    // The verification URL depends on nationName, so it must be generated client-side
     const verificationUrl = `https://www.nationstates.net/page=verify_login?token=${encodeURIComponent(generateNSToken(nationName))}`;
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -42,8 +43,10 @@ export default function SignLetter() {
             if (response.ok) {
                 setMessage(data.message);
                 setIsError(false);
-                setNationName('');
-                setChecksum('');
+                // Redirect to main page after a short delay
+                setTimeout(() => {
+                    router.push('/');
+                }, 2000); // Redirect after 2 seconds
             } else {
                 setMessage(data.error || 'An unexpected error occurred.');
                 setIsError(true);
@@ -57,12 +60,108 @@ export default function SignLetter() {
         }
     };
 
+    const styles: { [key: string]: React.CSSProperties } = {
+        container: {
+            minHeight: '100vh',
+            padding: '0 0.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: '#EAEAE2',
+            color: 'black',
+        },
+        main: {
+            padding: '16px',
+            maxWidth: '600px',
+            width: '100%',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            boxShadow: '3px 3px 12px #999',
+            textAlign: 'center',
+            margin: '20px 0',
+        },
+        title: {
+            // fontSize: '2rem', /* Global H1 applies */
+            marginBottom: '1.5rem',
+            // color: '#2c3e50',
+        },
+        instructions: {
+            fontSize: '10pt', /* Base font size */
+            marginBottom: '1rem',
+            textAlign: 'left',
+            lineHeight: '1.5em',
+        },
+        instructionList: {
+            listStyleType: 'decimal',
+            textAlign: 'left',
+            paddingLeft: '20px',
+            marginBottom: '2rem',
+            lineHeight: '1.5',
+            fontSize: '10pt',
+        },
+        link: {
+            color: 'green', // Default link color from global
+            wordBreak: 'break-all',
+        },
+        form: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '15px',
+            marginTop: '1rem',
+        },
+        formGroup: {
+            textAlign: 'left',
+        },
+        label: {
+            display: 'block',
+            marginBottom: '5px',
+            fontWeight: 'bold',
+            fontSize: '10pt', /* Base font size */
+        },
+        input: {
+            width: '100%',
+            // Styles are mostly global now, just ensure it takes full width
+        },
+        button: { /* NS button style */
+            padding: '0.5em 2.5em',
+            backgroundColor: '#EAEAE2',
+            color: '#000000',
+            border: '1px solid #DADAD2',
+            borderRadius: '0.2em',
+            fontSize: '1.1rem',
+            fontWeight: 'bold',
+            boxShadow: '1px 1px 2px rgba(0,0,0,0.1)',
+            cursor: 'pointer',
+            transition: 'background-color 0.3s ease',
+            // No direct hover state for inline styles, rely on global CSS for now
+        },
+        errorMessage: {
+            color: '#FF3333',
+            marginTop: '1rem',
+            fontWeight: 'bold',
+            border: 'solid 2px #CC6666',
+            borderRadius: '12px',
+            padding: '1em',
+            margin: '0.5em auto',
+            maxWidth: '75%', /* Adjust based on original NS error margin */
+            backgroundColor: 'white',
+        },
+        successMessage: {
+            color: 'green',
+            marginTop: '1rem',
+            fontWeight: 'bold',
+            border: 'solid 2px #696', /* NS info border */
+            borderRadius: '12px',
+            padding: '1em',
+            margin: '0.5em auto',
+            maxWidth: '75%',
+            backgroundColor: '#F0FFF0', /* NS info background */
+        },
+    };
+
     return (
         <div style={styles.container}>
-            <Head>
-                <title>Sign the Open Letter</title>
-            </Head>
-
             <main style={styles.main}>
                 <h1 style={styles.title}>Sign the Open Letter</h1>
 
@@ -128,88 +227,3 @@ export default function SignLetter() {
         </div>
     );
 }
-
-const styles: { [key: string]: React.CSSProperties } = {
-    container: {
-        minHeight: '100vh',
-        padding: '0 0.5rem',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        fontFamily: 'Arial, sans-serif',
-        backgroundColor: '#f0f2f5',
-        color: '#333',
-    },
-    main: {
-        padding: '2rem',
-        maxWidth: '600px',
-        width: '100%',
-        backgroundColor: 'white',
-        borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-        textAlign: 'center',
-    },
-    title: {
-        fontSize: '2rem',
-        marginBottom: '1.5rem',
-        color: '#2c3e50',
-    },
-    instructions: {
-        fontSize: '1.1rem',
-        marginBottom: '1rem',
-        textAlign: 'left',
-    },
-    instructionList: {
-        listStyleType: 'decimal',
-        textAlign: 'left',
-        paddingLeft: '20px',
-        marginBottom: '2rem',
-        lineHeight: '1.5',
-    },
-    link: {
-        color: '#3498db',
-        wordBreak: 'break-all',
-    },
-    form: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '15px',
-    },
-    formGroup: {
-        textAlign: 'left',
-    },
-    label: {
-        display: 'block',
-        marginBottom: '5px',
-        fontWeight: 'bold',
-    },
-    input: {
-        width: '100%',
-        padding: '10px',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
-        fontSize: '1rem',
-    },
-    button: {
-        padding: '12px 25px',
-        backgroundColor: '#2ecc71',
-        color: 'white',
-        border: 'none',
-        borderRadius: '5px',
-        fontSize: '1.1rem',
-        fontWeight: 'bold',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s ease',
-    },
-    errorMessage: {
-        color: 'red',
-        marginTop: '1rem',
-        fontWeight: 'bold',
-    },
-    successMessage: {
-        color: 'green',
-        marginTop: '1rem',
-        fontWeight: 'bold',
-    },
-};

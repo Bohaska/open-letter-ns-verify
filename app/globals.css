@@ -1,6 +1,113 @@
 /* app/globals.css */
-body {
+
+/* Reset basic margins */
+html, body {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+/* Common - inspired by NS CSS */
+body {
+    font-size: 10pt;
+    color: black;
+    background-color: white;
+    font-family: 'Helvetica Neue', Verdana, Tahoma, sans-serif;
+}
+img {
+    border: 0;
+}
+h1 {
+    font-size: 3.5em;
+    font-family: Georgia, Garamond, "Times New Roman", Times, serif;
+    font-weight: normal;
+    margin-top: 0.4em;
+    margin-bottom: 0.4em;
+    text-shadow: 2px 2px 1px #CCC;
+    color: #111;
+    letter-spacing: -1px;
+}
+h2 {
+    font-size: 2em;
+    font-family: Georgia, Garamond, 'Times New Roman', Times, serif;
+    font-weight: normal;
+    color: #111;
+    letter-spacing: -1px;
+}
+h3 { /* NS CSS h3 is 12pt bold, Georgia */
+    font-size: 12pt;
+    font-weight: bold;
+    font-family: Georgia, Garamond, "Times New Roman", Times, serif;
+}
+p {
+    line-height: 1.5em; /* General paragraph line height */
+}
+
+/* Links - inspired by NS CSS */
+a:link, a:visited {
+    color: green;
+    text-decoration: none;
+    transition: color 0.25s ease-out; /* Note: transitions won't fully work with inline styles, but good to keep here */
+}
+a:active {
+    color: #00CC00;
+    text-decoration: none;
+    transition: none;
+}
+a:hover {
+    color: #00CC00;
+    text-decoration: underline;
+    transition: none;
+}
+
+/* Input/Textarea base styles (simplified from NS) */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+textarea {
+    font-family: Verdana, Tahoma, sans-serif; /* Simplified, NS uses Special Elite for some inputs */
+    font-size: 16px;
+    box-sizing: border-box;
+    border: 2px solid #CCC; /* NS style */
+    border-radius: 0px; /* NS style */
+    background-color: #F0F0F0; /* NS style */
+    padding: 6px; /* NS style */
+    color: black; /* Default text color */
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+textarea:focus {
+    border-color: #666; /* NS style */
+    background-color: #FFFFFF; /* NS style */
+    outline: none; /* Remove default focus outline */
+}
+
+
+/* General button styles (simplified from NS for inline application) */
+button {
+    color: #000000;
+    background-color: #EAEAE2; /* A light grey tone from NS */
+    border: 1px solid #DADAD2;
+    border-radius: 4px;
+    padding: 0.5em 1em;
+    font-family: 'Helvetica Neue', Verdana, Tahoma, sans-serif;
+    cursor: pointer;
+    box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    transition: background-color 0.25s ease-out, box-shadow 0.25s ease-out;
+}
+
+button:hover {
+    background-color: white; /* Mimic NS general button hover */
+    box-shadow: 1px 1px 4px rgba(0,0,0,0.2);
+}
+
+button:disabled {
+    color: #CCCCCC !important;
+    background-image: none !important;
+    background-color: #F4F4F4 !important;
+    text-shadow: none !important;
+    border-color: #D4D4D4 !important;
+    cursor: not-allowed;
 }
