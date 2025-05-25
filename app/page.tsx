@@ -164,8 +164,6 @@ export default function Home() {
     return (
         <div style={styles.container}>
             <main style={styles.main}>
-                <h1 style={styles.title}>Regarding Separatist Peoples</h1>
-
                 <div style={styles.letterContentEmbed}>
                     <iframe
                         src={GOOGLE_DOC_EMBED_URL}
