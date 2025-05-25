@@ -127,21 +127,20 @@ export default function Home() {
             color: 'black',
         },
         flagImageWrapper: {
-            width: '30px',
-            height: '20px',
-            position: 'relative',
-            marginRight: '10px',
-            display: 'flex',
-            justifyContent: 'center',
+            height: '24px',
+            display: 'inline-flex',
             alignItems: 'center',
+            justifyContent: 'flex-start',
             overflow: 'hidden',
+            marginRight: '10px',
             border: '1px solid #999',
             filter: 'drop-shadow(0 0 1.2px #999)',
+            flexShrink: 0,
         },
         flagImage: {
-            objectFit: 'contain',
-            width: '100%',
             height: '100%',
+            width: 'auto',
+            objectFit: 'contain',
         },
         errorText: {
             color: '#FF3333',
@@ -196,8 +195,8 @@ export default function Home() {
                                         <Image
                                             src={signature.flagUrl}
                                             alt={`${signature.nationName} flag`}
-                                            width={30}
-                                            height={20}
+                                            width={100}
+                                            height={24}
                                             style={styles.flagImage}
                                             unoptimized={true}
                                         />
