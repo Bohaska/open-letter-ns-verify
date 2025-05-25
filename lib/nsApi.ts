@@ -1,9 +1,13 @@
 // lib/nsApi.ts
 import { parseStringPromise } from 'xml2js';
 import crypto from 'crypto';
+import { db, NationCacheRow } from './db'; // Import db and NationCacheRow
 
 const NS_API_BASE_URL = 'https://www.nationstates.net/cgi-bin/api.cgi';
-const USER_AGENT = 'OpenLetterNSVerify/1.0 (Jiangbei)'; // IMPORTANT: Set a meaningful User-Agent
+const USER_AGENT = 'OpenLetterNSVerify/1.0 (contact@example.com - replace with your actual contact)';
+
+// Define cache duration in hours
+const CACHE_DURATION_HOURS = 24; // Cache data for 24 hours
 
 /**
  * Generates a consistent token for NationStates verification based on the nation name.
@@ -32,7 +36,7 @@ export async function verifyNation(nationName: string, checksum: string): Promis
     const token = generateNSToken(nationName);
     const url = new URL(NS_API_BASE_URL);
     url.searchParams.append('a', 'verify');
-    url.searchParams.append('nation', nationName.replace(/ /g, '_')); // Replace spaces for URL
+    url.searchParams.append('nation', nationName.replace(/ /g, '_'));
     url.searchParams.append('checksum', checksum);
     url.searchParams.append('token', token);
 
@@ -41,7 +45,7 @@ export async function verifyNation(nationName: string, checksum: string): Promis
             headers: {
                 'User-Agent': USER_AGENT,
             },
-            cache: 'no-store', // Important: Ensures fresh data for verification
+            cache: 'no-store',
         });
 
         if (!response.ok) {
@@ -51,10 +55,9 @@ export async function verifyNation(nationName: string, checksum: string): Promis
         }
 
         const textResult = await response.text();
-        // The verify endpoint returns plain '1' or '0'
-        return textResult.trim() === '1'; // Trim to remove any potential whitespace
+        return textResult.trim() === '1';
 
-    } catch (error: any) { // Explicitly type error as any for logging flexibility
+    } catch (error: any) {
         console.error(`Error verifying nation with NationStates API (${nationName}): ${error?.message || error}`);
         return false;
     }
@@ -68,16 +71,46 @@ interface NationDisplayData {
 
 /**
  * Fetches basic display data (flag, region) for a given nation from the NationStates API.
+ * Implements a caching mechanism.
  * Returns null if data cannot be fetched, if the nation is invalid, or if parsing fails.
  * @param nationName The name of the nation.
  * @returns An object with nation name, flag URL, and region, or null.
  */
 export async function getNationDisplayData(nationName: string): Promise<NationDisplayData | null> {
-    const url = new URL(NS_API_BASE_URL);
-    url.searchParams.append('nation', nationName.replace(/ /g, '_'));
-    url.searchParams.append('q', 'flag+region'); // Request flag and region shards
+    const formattedNationName = nationName.replace(/ /g, '_');
+    const now = new Date();
 
     try {
+        // 1. Check Cache First
+        const cachedData: NationCacheRow | undefined = await db.get(
+            'SELECT "flagUrl", region, "lastUpdated" FROM nation_cache WHERE "nationName" = $1',
+            [nationName]
+        );
+
+        if (cachedData) {
+            const lastUpdatedDate = new Date(cachedData.lastUpdated);
+            const hoursSinceUpdate = (now.getTime() - lastUpdatedDate.getTime()) / (1000 * 60 * 60);
+
+            if (hoursSinceUpdate < CACHE_DURATION_HOURS) {
+                // Cache is fresh, return cached data
+                console.log(`Cache hit for ${nationName}. Returning cached data.`);
+                return {
+                    name: nationName, // Use the originally requested name
+                    flagUrl: cachedData.flagUrl,
+                    region: cachedData.region,
+                };
+            } else {
+                console.log(`Cache expired for ${nationName}. Fetching from API.`);
+            }
+        } else {
+            console.log(`No cache entry for ${nationName}. Fetching from API.`);
+        }
+
+        // 2. If not in cache or cache expired, fetch from NationStates API
+        const url = new URL(NS_API_BASE_URL);
+        url.searchParams.append('nation', formattedNationName);
+        url.searchParams.append('q', 'flag+region');
+
         const response = await fetch(url.toString(), {
             headers: {
                 'User-Agent': USER_AGENT,
@@ -87,43 +120,50 @@ export async function getNationDisplayData(nationName: string): Promise<NationDi
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`NationStates API error (getNationDisplayData for ${nationName}): Status ${response.status} - ${response.statusText}. Details: ${errorText}`);
-            return null; // Return null on non-OK HTTP status
+            return null;
         }
 
         const xml = await response.text();
-        console.log(xml);
-
-        // Basic sanity check for XML structure to avoid parsing non-XML errors
         if (!xml.trim().startsWith('<')) {
             console.warn(`Non-XML response for nation ${nationName}. Returning null. Response snippet: ${xml.substring(0, 100)}...`);
             return null;
         }
 
         const result = await parseStringPromise(xml, { explicitArray: false, mergeAttrs: true });
-
         const nationData = result.NATION;
 
-        // Crucial: Check if the NATION tag exists AND if it contains a NAME tag.
-        // The NS API returns <NATION id="invalid_name"/> for non-existent nations,
-        // which won't have a <NAME> sub-tag.
         const isValidNationData = nationData && nationData.NAME;
 
         if (!isValidNationData) {
             console.warn(`No valid nation data (missing <NAME> tag) or invalid nation response for: ${nationName}. Full XML:`, xml);
+            // Optionally, delete invalid entry from cache if it exists
+            if (cachedData) {
+                await db.run('DELETE FROM nation_cache WHERE "nationName" = $1', [nationName]);
+                console.log(`Removed invalid cached entry for ${nationName}.`);
+            }
             return null;
         }
 
         const flagCode = nationData.FLAG;
-        const flagUrl = flagCode ? `https://www.nationstates.net/images/flags/${flagCode}.jpg` : '';
-        const region = nationData.REGION;
+        const fetchedFlagUrl = flagCode ? `https://www.nationstates.net/images/flags/${flagCode}.jpg` : '';
+        const fetchedRegion = nationData.REGION;
+
+        // 3. Update/Insert into Cache
+        await db.run(
+            `INSERT INTO nation_cache ("nationName", "flagUrl", region, "lastUpdated")
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT ("nationName") DO UPDATE SET "flagUrl" = $2, region = $3, "lastUpdated" = NOW()`,
+            [nationData.NAME, fetchedFlagUrl, fetchedRegion]
+        );
+        console.log(`Cache updated/inserted for ${nationData.NAME}.`);
 
         return {
-            name: nationData.NAME, // We are now confident nationData.NAME exists
-            flagUrl: flagUrl,
-            region: region || 'Unknown Region', // Fallback for region if it's missing (shouldn't be if NAME exists, but good to be safe)
+            name: nationData.NAME,
+            flagUrl: fetchedFlagUrl,
+            region: fetchedRegion || 'Unknown Region',
         };
-    } catch (error: any) { // Explicitly type error as any for logging flexibility
-        console.error(`Error fetching nation display data for ${nationName}: ${error?.message || String(error)}`); // String(error) for non-Error objects
+    } catch (error: any) {
+        console.error(`Error fetching or caching nation display data for ${nationName}: ${error?.message || String(error)}`);
         return null;
     }
 }
